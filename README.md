@@ -55,6 +55,23 @@ pnpm --filter server test -- --watch
 pnpm build
 ```
 
+## Copilot Cloud Agent Handoff
+
+Use these steps when delegating issue work to the cloud agent from Copilot CLI:
+
+1. Start Copilot CLI from the repository root:
+   ```bash
+   cd /home/runner/work/discord-sudoku/discord-sudoku
+   copilot
+   ```
+2. (Optional) Select your preferred model (for example, Claude Sonnet 4.6) with `/model`.
+3. Run `/delegate` with a short prompt that points to the issue:
+   ```
+   Work on GitHub issue #56 in Trinityy2/discord-sudoku. Read the full issue body for all instructions.
+   ```
+
+If `/delegate` reports `not a git repository`, exit the CLI and relaunch it from this repository root path.
+
 ## Architecture
 
 See individual package READMEs:
