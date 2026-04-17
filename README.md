@@ -61,13 +61,13 @@ Use these steps when delegating issue work to the cloud agent from Copilot CLI:
 
 1. Start Copilot CLI from the repository root:
    ```bash
-   cd /home/runner/work/discord-sudoku/discord-sudoku
+   cd /path/to/discord-sudoku
    copilot
    ```
 2. (Optional) Select your preferred model (for example, Claude Sonnet 4.6) with `/model`.
 3. Run `/delegate` with a short prompt that points to the issue:
    ```
-   Work on GitHub issue #56 in Trinityy2/discord-sudoku. Read the full issue body for all instructions.
+   Work on GitHub issue #<ISSUE_NUMBER> in <OWNER>/<REPO>. Read the full issue body for all instructions.
    ```
 
 If `/delegate` reports `not a git repository`, exit the CLI and relaunch it from this repository root path.
