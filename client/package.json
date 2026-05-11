@@ -11,7 +11,7 @@
     "react-dom": "^18.0.0",
     "xstate": "^5.0.0",
     "@xstate/react": "^4.0.0",
-    "@discord/embedded-app-sdk": "latest"
+    "@discord/embedded-app-sdk": "^1.0.0"
   },
   "devDependencies": {
     "vite": "^6.0.0",
