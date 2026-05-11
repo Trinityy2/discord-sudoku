@@ -32,6 +32,7 @@ app.post('/api/token', async (req, res) => {
     }),
   })
   if (!tokenRes.ok) {
+    console.warn(`[/api/token] Discord token exchange failed: HTTP ${tokenRes.status}`)
     res.status(401).json({ error: 'Token exchange failed' })
     return
   }

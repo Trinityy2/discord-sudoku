@@ -30,7 +30,8 @@ export function registerHandlers(io: IoServer, socket: IoSocket, deps: HandlerDe
     let user: { id: string; username: string; avatar: string }
     try {
       user = await verifyToken(accessToken)
-    } catch {
+    } catch (err) {
+      console.warn(`[join_room] token verification failed for socket ${socket.id}:`, (err as Error).message)
       socket.disconnect()
       return
     }
