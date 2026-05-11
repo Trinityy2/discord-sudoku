@@ -2,7 +2,7 @@ import type { Cell, CellCoord } from './board'
 import type { RoomPhase, PlayerInfo, GameStats, RoomState } from './room'
 
 export interface ClientToServerEvents {
-  join_room: (data: { channelId: string; userId: string; username: string; avatar: string }) => void
+  join_room: (data: { channelId: string; accessToken: string }) => void
   begin_setup: () => void
   place_given: (data: { row: number; col: number; value: number }) => void
   clear_given: (data: { row: number; col: number }) => void

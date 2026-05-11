@@ -1,22 +1,43 @@
 import type { Server, Socket } from 'socket.io'
 import type { ClientToServerEvents, ServerToClientEvents, CellCoord } from 'shared'
-import { roomManager } from '../rooms/roomManager'
+import { roomManager as defaultRoomManager } from '../rooms/roomManager'
+import type { RoomManager } from '../rooms/roomManager'
 import { assignColour } from '../rooms/player'
 import type { Player } from '../rooms/player'
 import { registry } from '../rulesets/index'
 import { placeGiven, clearGiven, placeDigit, clearCell, toggleNote, applyConflicts, isComplete } from '../board/board'
+import { verifyDiscordToken } from '../auth/discordAuth'
+import type { TokenVerifier } from '../auth/discordAuth'
 
 type IoServer = Server<ClientToServerEvents, ServerToClientEvents>
 type IoSocket = Socket<ClientToServerEvents, ServerToClientEvents>
 
-// Map socketId -> channelId
-const socketChannelMap = new Map<string, string>()
-// Map socketId -> playerId
-const socketPlayerMap = new Map<string, string>()
+export interface HandlerDeps {
+  rm?: RoomManager
+  verifyToken?: TokenVerifier
+}
 
-export function registerHandlers(io: IoServer, socket: IoSocket) {
-  socket.on('join_room', ({ channelId, userId, username, avatar }) => {
-    const existingRoom = roomManager.get(channelId)
+export function registerHandlers(io: IoServer, socket: IoSocket, deps: HandlerDeps = {}) {
+  const rm = deps.rm ?? defaultRoomManager
+  const verifyToken = deps.verifyToken ?? verifyDiscordToken
+
+  // Map socketId -> channelId
+  const socketChannelMap = new Map<string, string>()
+  // Map socketId -> playerId
+  const socketPlayerMap = new Map<string, string>()
+
+  socket.on('join_room', async ({ channelId, accessToken }) => {
+    let user: { id: string; username: string; avatar: string }
+    try {
+      user = await verifyToken(accessToken)
+    } catch {
+      socket.disconnect()
+      return
+    }
+
+    const { id: userId, username, avatar } = user
+
+    const existingRoom = rm.get(channelId)
     const isFirstPlayer = !existingRoom || existingRoom.players.length === 0
     const playerIndex = existingRoom ? existingRoom.players.length : 0
     const colour = assignColour(playerIndex)
@@ -30,7 +51,7 @@ export function registerHandlers(io: IoServer, socket: IoSocket) {
       isHost: isFirstPlayer,
     }
 
-    const room = roomManager.getOrCreate(channelId, player)
+    const room = rm.getOrCreate(channelId, player)
 
     if (!isFirstPlayer) {
       room.addPlayer(player)
@@ -47,10 +68,11 @@ export function registerHandlers(io: IoServer, socket: IoSocket) {
   socket.on('begin_setup', () => {
     const channelId = socketChannelMap.get(socket.id)
     if (!channelId) return
-    const room = roomManager.get(channelId)
+    const room = rm.get(channelId)
     if (!room) return
 
     const playerId = socketPlayerMap.get(socket.id)
+    if (!playerId) return
     room.sendToMachine({ type: 'BEGIN_SETUP', senderId: playerId })
 
     const state = room.getState()
@@ -62,7 +84,7 @@ export function registerHandlers(io: IoServer, socket: IoSocket) {
   socket.on('place_given', ({ row, col, value }) => {
     const channelId = socketChannelMap.get(socket.id)
     if (!channelId) return
-    const room = roomManager.get(channelId)
+    const room = rm.get(channelId)
     if (!room) return
     if (room.getState().phase !== 'SETUP') return
 
@@ -82,7 +104,7 @@ export function registerHandlers(io: IoServer, socket: IoSocket) {
   socket.on('clear_given', ({ row, col }) => {
     const channelId = socketChannelMap.get(socket.id)
     if (!channelId) return
-    const room = roomManager.get(channelId)
+    const room = rm.get(channelId)
     if (!room) return
     if (room.getState().phase !== 'SETUP') return
 
@@ -102,10 +124,11 @@ export function registerHandlers(io: IoServer, socket: IoSocket) {
   socket.on('start_game', () => {
     const channelId = socketChannelMap.get(socket.id)
     if (!channelId) return
-    const room = roomManager.get(channelId)
+    const room = rm.get(channelId)
     if (!room) return
 
     const playerId = socketPlayerMap.get(socket.id)
+    if (!playerId) return
     room.sendToMachine({ type: 'START_GAME', senderId: playerId })
 
     const state = room.getState()
@@ -117,7 +140,7 @@ export function registerHandlers(io: IoServer, socket: IoSocket) {
   socket.on('set_ruleset', ({ rulesetId }) => {
     const channelId = socketChannelMap.get(socket.id)
     if (!channelId) return
-    const room = roomManager.get(channelId)
+    const room = rm.get(channelId)
     if (!room) return
     if (room.getState().phase !== 'SETUP') return
 
@@ -131,7 +154,7 @@ export function registerHandlers(io: IoServer, socket: IoSocket) {
   socket.on('place_digit', ({ row, col, value }) => {
     const channelId = socketChannelMap.get(socket.id)
     if (!channelId) return
-    const room = roomManager.get(channelId)
+    const room = rm.get(channelId)
     if (!room) return
     if (room.getState().phase !== 'PLAYING') return
 
@@ -140,12 +163,30 @@ export function registerHandlers(io: IoServer, socket: IoSocket) {
 
     room.board = placeDigit(room.board, row, col, value, playerId)
 
+    // Recompute full-board conflicts after each placement
     const ruleset = registry.get(room.rulesetId)
-    const conflicts = ruleset.validate(room.board, room.metadata, row, col, value)
+    const allConflicts: CellCoord[] = []
+    for (let r = 0; r < 9; r++) {
+      for (let c = 0; c < 9; c++) {
+        const cell = room.board[r][c]
+        if (cell.value !== null) {
+          const cellConflicts = ruleset.validate(room.board, room.metadata, r, c, cell.value)
+          allConflicts.push(...cellConflicts)
+        }
+      }
+    }
+    const seen = new Set<string>()
+    const conflicts = allConflicts.filter(coord => {
+      const key = `${coord.row},${coord.col}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
     room.board = applyConflicts(room.board, conflicts)
 
-    const allFilled = room.board.every(row => row.every(cell => cell.value !== null))
-    if (allFilled) {
+    room.sendToMachine({ type: 'PLACE_DIGIT', row, col, value, playerId, conflicts })
+
+    if (isComplete(room.board)) {
       const actor = room.getActor()
       const snapshot = actor.getSnapshot()
       const elapsedMs = snapshot.context.startedAt ? Date.now() - snapshot.context.startedAt : 0
@@ -164,7 +205,9 @@ export function registerHandlers(io: IoServer, socket: IoSocket) {
         }
       }
       const stats = { elapsedMs, contributions }
-      room.sendToMachine({ type: 'PLACE_DIGIT', row, col, value, playerId, conflicts })
+      const finalCell = room.board[row][col]
+      io.to(channelId).emit('cell_updated', { row, col, cell: finalCell, conflicts })
+      io.to(channelId).emit('phase_changed', { phase: 'COMPLETED' })
       io.to(channelId).emit('game_completed', { stats })
     } else {
       const cell = room.board[row][col]
@@ -175,7 +218,7 @@ export function registerHandlers(io: IoServer, socket: IoSocket) {
   socket.on('clear_cell', ({ row, col }) => {
     const channelId = socketChannelMap.get(socket.id)
     if (!channelId) return
-    const room = roomManager.get(channelId)
+    const room = rm.get(channelId)
     if (!room) return
     if (room.getState().phase !== 'PLAYING') return
 
@@ -199,6 +242,7 @@ export function registerHandlers(io: IoServer, socket: IoSocket) {
       return true
     })
     room.board = applyConflicts(room.board, dedupedConflicts)
+    room.sendToMachine({ type: 'CLEAR_CELL', row, col, conflicts: dedupedConflicts })
     const cell = room.board[row][col]
     io.to(channelId).emit('cell_updated', { row, col, cell, conflicts: dedupedConflicts })
   })
@@ -206,11 +250,12 @@ export function registerHandlers(io: IoServer, socket: IoSocket) {
   socket.on('toggle_note', ({ row, col, noteType, value }) => {
     const channelId = socketChannelMap.get(socket.id)
     if (!channelId) return
-    const room = roomManager.get(channelId)
+    const room = rm.get(channelId)
     if (!room) return
     if (room.getState().phase !== 'PLAYING') return
 
     room.board = toggleNote(room.board, row, col, noteType, value)
+    room.sendToMachine({ type: 'TOGGLE_NOTE', row, col, noteType, value })
     const cell = room.board[row][col]
     io.to(channelId).emit('cell_updated', { row, col, cell, conflicts: [] })
   })
@@ -226,13 +271,13 @@ export function registerHandlers(io: IoServer, socket: IoSocket) {
   socket.on('disconnect', () => {
     const channelId = socketChannelMap.get(socket.id)
     if (!channelId) return
-    const room = roomManager.get(channelId)
+    const room = rm.get(channelId)
     if (!room) return
 
     const result = room.removePlayer(socket.id)
 
     if (result.empty) {
-      roomManager.destroy(channelId)
+      rm.destroy(channelId)
     } else {
       const playerId = socketPlayerMap.get(socket.id)
       if (playerId) {

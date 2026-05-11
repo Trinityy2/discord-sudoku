@@ -5,165 +5,31 @@ import { io as Client, type Socket as ClientSocket } from 'socket.io-client'
 import type { AddressInfo } from 'net'
 import type { ClientToServerEvents, ServerToClientEvents } from 'shared'
 import { RoomManager } from '../rooms/roomManager'
-import { assignColour } from '../rooms/player'
-import { placeGiven } from '../board/board'
-import { registry } from '../rulesets/index'
-import { placeDigit, applyConflicts, isComplete, clearCell, toggleNote } from '../board/board'
-import type { Player } from '../rooms/player'
+import { registerHandlers } from './handlers'
+import type { TokenVerifier } from '../auth/discordAuth'
+
+// Mock token verifier — maps "token:<id>:<username>" → DiscordUser
+const mockVerify: TokenVerifier = async (token) => {
+  const [, id, username] = token.split(':')
+  if (!id || !username) throw new Error('Invalid mock token')
+  return { id, username, avatar: '' }
+}
+
+function makeToken(id: string, username: string) {
+  return `token:${id}:${username}`
+}
 
 function createTestServer() {
   const httpServer = createServer()
   const testRoomManager = new RoomManager()
-  const socketChannelMap = new Map<string, string>()
-  const socketPlayerMap = new Map<string, string>()
 
   const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
     cors: { origin: '*' },
   })
 
-  io.on('connection', (socket) => {
-    socket.on('join_room', ({ channelId, userId, username, avatar }) => {
-      const existingRoom = testRoomManager.get(channelId)
-      const isFirstPlayer = !existingRoom || existingRoom.players.length === 0
-      const playerIndex = existingRoom ? existingRoom.players.length : 0
-      const colour = assignColour(playerIndex)
-
-      const player: Player = {
-        id: userId,
-        username,
-        avatar,
-        colour,
-        socketId: socket.id,
-        isHost: isFirstPlayer,
-      }
-
-      const room = testRoomManager.getOrCreate(channelId, player)
-
-      if (!isFirstPlayer) {
-        room.addPlayer(player)
-      }
-
-      socketChannelMap.set(socket.id, channelId)
-      socketPlayerMap.set(socket.id, userId)
-
-      socket.join(channelId)
-      socket.emit('room_state', room.getState())
-      socket.to(channelId).emit('player_joined', player as any)
-    })
-
-    socket.on('begin_setup', () => {
-      const channelId = socketChannelMap.get(socket.id)
-      if (!channelId) return
-      const room = testRoomManager.get(channelId)
-      if (!room) return
-      const playerId = socketPlayerMap.get(socket.id)
-      room.sendToMachine({ type: 'BEGIN_SETUP', senderId: playerId })
-      const state = room.getState()
-      if (state.phase === 'SETUP') {
-        io.to(channelId).emit('phase_changed', { phase: 'SETUP' })
-      }
-    })
-
-    socket.on('place_given', ({ row, col, value }) => {
-      const channelId = socketChannelMap.get(socket.id)
-      if (!channelId) return
-      const room = testRoomManager.get(channelId)
-      if (!room) return
-      if (room.getState().phase !== 'SETUP') return
-      const hostPlayer = room.players.find(p => p.socketId === socket.id)
-      if (!hostPlayer?.isHost) return
-      try {
-        room.board = placeGiven(room.board, row, col, value)
-        room.sendToMachine({ type: 'PLACE_GIVEN', row, col, value })
-        const cell = room.board[row][col]
-        io.to(channelId).emit('cell_updated', { row, col, cell, conflicts: [] })
-      } catch (e) {}
-    })
-
-    socket.on('start_game', () => {
-      const channelId = socketChannelMap.get(socket.id)
-      if (!channelId) return
-      const room = testRoomManager.get(channelId)
-      if (!room) return
-      const playerId = socketPlayerMap.get(socket.id)
-      room.sendToMachine({ type: 'START_GAME', senderId: playerId })
-      const state = room.getState()
-      if (state.phase === 'PLAYING') {
-        io.to(channelId).emit('phase_changed', { phase: 'PLAYING' })
-      }
-    })
-
-    socket.on('place_digit', ({ row, col, value }) => {
-      const channelId = socketChannelMap.get(socket.id)
-      if (!channelId) return
-      const room = testRoomManager.get(channelId)
-      if (!room) return
-      if (room.getState().phase !== 'PLAYING') return
-      const playerId = socketPlayerMap.get(socket.id)
-      if (!playerId) return
-
-      room.board = placeDigit(room.board, row, col, value, playerId)
-      const rulesetObj = registry.get(room.rulesetId)
-      const conflicts = rulesetObj.validate(room.board, room.metadata, row, col, value)
-      room.board = applyConflicts(room.board, conflicts)
-
-      const allFilled = room.board.every(r => r.every(c => c.value !== null))
-      if (allFilled) {
-        const actor = room.getActor()
-        const snapshot = actor.getSnapshot()
-        const elapsedMs = snapshot.context.startedAt ? Date.now() - snapshot.context.startedAt : 0
-        const contributions: { playerId: string; count: number }[] = []
-        for (let r = 0; r < 9; r++) {
-          for (let c = 0; c < 9; c++) {
-            const cell = room.board[r][c]
-            if (!cell.isGiven && cell.placedBy) {
-              const existing = contributions.find(x => x.playerId === cell.placedBy)
-              if (existing) existing.count++
-              else contributions.push({ playerId: cell.placedBy!, count: 1 })
-            }
-          }
-        }
-        const stats = { elapsedMs, contributions }
-        room.sendToMachine({ type: 'PLACE_DIGIT', row, col, value, playerId, conflicts })
-        io.to(channelId).emit('game_completed', { stats })
-      } else {
-        const cell = room.board[row][col]
-        io.to(channelId).emit('cell_updated', { row, col, cell, conflicts })
-      }
-    })
-
-    socket.on('cursor_moved', ({ row, col }) => {
-      const channelId = socketChannelMap.get(socket.id)
-      if (!channelId) return
-      const playerId = socketPlayerMap.get(socket.id)
-      if (!playerId) return
-      socket.to(channelId).emit('cursor_updated', { playerId, row, col })
-    })
-
-    socket.on('disconnect', () => {
-      const channelId = socketChannelMap.get(socket.id)
-      if (!channelId) return
-      const room = testRoomManager.get(channelId)
-      if (!room) return
-
-      const result = room.removePlayer(socket.id)
-
-      if (result.empty) {
-        testRoomManager.destroy(channelId)
-      } else {
-        const playerId = socketPlayerMap.get(socket.id)
-        if (playerId) {
-          io.to(channelId).emit('player_left', { playerId })
-          if (result.newHostId) {
-            io.to(channelId).emit('host_changed', { newHostId: result.newHostId })
-          }
-        }
-      }
-
-      socketChannelMap.delete(socket.id)
-      socketPlayerMap.delete(socket.id)
-    })
-  })
+  io.on('connection', (socket) =>
+    registerHandlers(io, socket, { rm: testRoomManager, verifyToken: mockVerify })
+  )
 
   return { httpServer, io, testRoomManager }
 }
@@ -176,7 +42,10 @@ function connectClient(url: string): Promise<ClientSocket<ServerToClientEvents, 
   })
 }
 
-function waitFor<T>(socket: ClientSocket<ServerToClientEvents, ClientToServerEvents>, event: keyof ServerToClientEvents): Promise<T> {
+function waitFor<T>(
+  socket: ClientSocket<ServerToClientEvents, ClientToServerEvents>,
+  event: keyof ServerToClientEvents,
+): Promise<T> {
   return new Promise((resolve) => {
     socket.once(event as any, (data: any) => resolve(data))
   })
@@ -216,12 +85,12 @@ describe('Socket handlers integration', () => {
 
   it('two clients join same channelId → both receive room_state; second receives player_joined', async () => {
     const roomStatePromise1 = waitFor(client1, 'room_state')
-    client1.emit('join_room', { channelId: 'test-1', userId: 'user1', username: 'User1', avatar: '' })
+    client1.emit('join_room', { channelId: 'test-1', accessToken: makeToken('user1', 'User1') })
     await roomStatePromise1
 
     const playerJoinedPromise = waitFor(client1, 'player_joined')
     const roomStatePromise2 = waitFor(client2, 'room_state')
-    client2.emit('join_room', { channelId: 'test-1', userId: 'user2', username: 'User2', avatar: '' })
+    client2.emit('join_room', { channelId: 'test-1', accessToken: makeToken('user2', 'User2') })
 
     const [roomState2, playerJoined] = await Promise.all([roomStatePromise2, playerJoinedPromise])
     expect((roomState2 as any).players).toHaveLength(2)
@@ -230,11 +99,11 @@ describe('Socket handlers integration', () => {
 
   it('host sends begin_setup → both clients receive phase_changed { phase: SETUP }', async () => {
     const rs1 = waitFor(client1, 'room_state')
-    client1.emit('join_room', { channelId: 'test-2', userId: 'host', username: 'Host', avatar: '' })
+    client1.emit('join_room', { channelId: 'test-2', accessToken: makeToken('host', 'Host') })
     await rs1
 
     const rs2 = waitFor(client2, 'room_state')
-    client2.emit('join_room', { channelId: 'test-2', userId: 'user2', username: 'User2', avatar: '' })
+    client2.emit('join_room', { channelId: 'test-2', accessToken: makeToken('user2', 'User2') })
     await rs2
 
     const phase1 = waitFor(client1, 'phase_changed')
@@ -248,7 +117,7 @@ describe('Socket handlers integration', () => {
 
   it('host sends place_given → both clients receive cell_updated with correct cell data', async () => {
     const rs1 = waitFor(client1, 'room_state')
-    client1.emit('join_room', { channelId: 'test-3', userId: 'host', username: 'Host', avatar: '' })
+    client1.emit('join_room', { channelId: 'test-3', accessToken: makeToken('host', 'Host') })
     await rs1
 
     await new Promise<void>(resolve => {
@@ -267,11 +136,11 @@ describe('Socket handlers integration', () => {
 
   it('host sends start_game → both clients receive phase_changed { phase: PLAYING }', async () => {
     const rs1 = waitFor(client1, 'room_state')
-    client1.emit('join_room', { channelId: 'test-4', userId: 'host', username: 'Host', avatar: '' })
+    client1.emit('join_room', { channelId: 'test-4', accessToken: makeToken('host', 'Host') })
     await rs1
 
     const rs2 = waitFor(client2, 'room_state')
-    client2.emit('join_room', { channelId: 'test-4', userId: 'user2', username: 'User2', avatar: '' })
+    client2.emit('join_room', { channelId: 'test-4', accessToken: makeToken('user2', 'User2') })
     await rs2
 
     await new Promise<void>(resolve => {
@@ -295,11 +164,11 @@ describe('Socket handlers integration', () => {
 
   it('client places a digit → other client receives cell_updated', async () => {
     const rs1 = waitFor(client1, 'room_state')
-    client1.emit('join_room', { channelId: 'test-5', userId: 'host', username: 'Host', avatar: '' })
+    client1.emit('join_room', { channelId: 'test-5', accessToken: makeToken('host', 'Host') })
     await rs1
 
     const rs2 = waitFor(client2, 'room_state')
-    client2.emit('join_room', { channelId: 'test-5', userId: 'user2', username: 'User2', avatar: '' })
+    client2.emit('join_room', { channelId: 'test-5', accessToken: makeToken('user2', 'User2') })
     await rs2
 
     await new Promise<void>(resolve => {
@@ -326,11 +195,11 @@ describe('Socket handlers integration', () => {
 
   it('client sends cursor_moved → other client receives cursor_updated with correct playerId', async () => {
     const rs1 = waitFor(client1, 'room_state')
-    client1.emit('join_room', { channelId: 'test-6', userId: 'host', username: 'Host', avatar: '' })
+    client1.emit('join_room', { channelId: 'test-6', accessToken: makeToken('host', 'Host') })
     await rs1
 
     const rs2 = waitFor(client2, 'room_state')
-    client2.emit('join_room', { channelId: 'test-6', userId: 'user2', username: 'User2', avatar: '' })
+    client2.emit('join_room', { channelId: 'test-6', accessToken: makeToken('user2', 'User2') })
     await rs2
 
     const cursorUpdated = waitFor(client1, 'cursor_updated')
@@ -344,11 +213,11 @@ describe('Socket handlers integration', () => {
   it('all non-given cells filled with valid digits → both receive game_completed', async () => {
     const channelId = 'test-7'
     const rs1 = waitFor(client1, 'room_state')
-    client1.emit('join_room', { channelId, userId: 'host', username: 'Host', avatar: '' })
+    client1.emit('join_room', { channelId, accessToken: makeToken('host', 'Host') })
     await rs1
 
     const rs2 = waitFor(client2, 'room_state')
-    client2.emit('join_room', { channelId, userId: 'user2', username: 'User2', avatar: '' })
+    client2.emit('join_room', { channelId, accessToken: makeToken('user2', 'User2') })
     await rs2
 
     await new Promise<void>(resolve => {
@@ -356,13 +225,24 @@ describe('Socket handlers integration', () => {
       client1.emit('begin_setup')
     })
 
-    // Place 80 givens, leave [8][8] empty
+    // Valid Sudoku solution grid — place 80 as givens, leave [8][8] (value 9) for the player
+    const solution = [
+      [5, 3, 4, 6, 7, 8, 9, 1, 2],
+      [6, 7, 2, 1, 9, 5, 3, 4, 8],
+      [1, 9, 8, 3, 4, 2, 5, 6, 7],
+      [8, 5, 9, 7, 6, 1, 4, 2, 3],
+      [4, 2, 6, 8, 5, 3, 7, 9, 1],
+      [7, 1, 3, 9, 2, 4, 8, 5, 6],
+      [9, 6, 1, 5, 3, 7, 2, 8, 4],
+      [2, 8, 7, 4, 1, 9, 6, 3, 5],
+      [3, 4, 5, 2, 8, 6, 1, 7, 9],
+    ]
     for (let r = 0; r < 9; r++) {
       for (let c = 0; c < 9; c++) {
         if (!(r === 8 && c === 8)) {
           await new Promise<void>(resolve => {
             client1.once('cell_updated', () => resolve())
-            client1.emit('place_given', { row: r, col: c, value: 1 })
+            client1.emit('place_given', { row: r, col: c, value: solution[r][c] })
           })
         }
       }
@@ -375,22 +255,23 @@ describe('Socket handlers integration', () => {
 
     const gc1 = waitFor(client1, 'game_completed')
     const gc2 = waitFor(client2, 'game_completed')
-    client1.emit('place_digit', { row: 8, col: 8, value: 1 })
+    // Place the final cell: value 9 at [8][8]
+    client1.emit('place_digit', { row: 8, col: 8, value: 9 })
 
     const [result1, result2] = await Promise.all([gc1, gc2])
     expect((result1 as any).stats).toBeDefined()
     expect((result2 as any).stats).toBeDefined()
-  })
+  }, 15000)
 
   it('host disconnects → remaining client receives host_changed with new host id', async () => {
     const channelId = 'test-8'
     const rs1 = waitFor(client1, 'room_state')
-    client1.emit('join_room', { channelId, userId: 'host', username: 'Host', avatar: '' })
+    client1.emit('join_room', { channelId, accessToken: makeToken('host', 'Host') })
     await rs1
 
     const pj = waitFor(client1, 'player_joined')
     const rs2 = waitFor(client2, 'room_state')
-    client2.emit('join_room', { channelId, userId: 'user2', username: 'User2', avatar: '' })
+    client2.emit('join_room', { channelId, accessToken: makeToken('user2', 'User2') })
     await Promise.all([pj, rs2])
 
     const hostChanged = waitFor(client2, 'host_changed')
@@ -403,7 +284,7 @@ describe('Socket handlers integration', () => {
   it('last client disconnects → room is destroyed', async () => {
     const channelId = 'test-9'
     const rs1 = waitFor(client1, 'room_state')
-    client1.emit('join_room', { channelId, userId: 'host', username: 'Host', avatar: '' })
+    client1.emit('join_room', { channelId, accessToken: makeToken('host', 'Host') })
     await rs1
 
     await new Promise<void>(resolve => setTimeout(resolve, 100))
@@ -413,3 +294,4 @@ describe('Socket handlers integration', () => {
     expect(testRoomManager.get(channelId)).toBeUndefined()
   })
 })
+

@@ -53,6 +53,7 @@ export class Room {
 
     if (wasHost) {
       this.players[0].isHost = true
+      this.actor.send({ type: 'HOST_CHANGED', newHostId: this.players[0].id })
       return { empty: false, newHostId: this.players[0].id }
     }
 

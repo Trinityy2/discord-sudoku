@@ -17,10 +17,11 @@ type RoomEvent =
   | { type: 'START_GAME'; senderId: string }
   | { type: 'RESET_BOARD' }
   | { type: 'PLACE_DIGIT'; row: number; col: number; value: number; playerId: string; conflicts: CellCoord[] }
-  | { type: 'CLEAR_CELL'; row: number; col: number }
+  | { type: 'CLEAR_CELL'; row: number; col: number; conflicts: CellCoord[] }
   | { type: 'TOGGLE_NOTE'; row: number; col: number; noteType: 'corner' | 'center'; value: number }
   | { type: 'JOIN'; player: PlayerInfo }
   | { type: 'LEAVE'; playerId: string }
+  | { type: 'HOST_CHANGED'; newHostId: string }
   | { type: 'SET_RULESET'; rulesetId: string }
   | { type: 'PLACE_GIVEN'; row: number; col: number; value: number }
   | { type: 'CLEAR_GIVEN'; row: number; col: number }
@@ -46,6 +47,11 @@ export function createRoomMachine(initialContext: RoomContext) {
           LEAVE: {
             actions: assign({
               players: ({ context, event }) => context.players.filter(p => p.id !== event.playerId),
+            }),
+          },
+          HOST_CHANGED: {
+            actions: assign({
+              hostId: ({ event }) => event.newHostId,
             }),
           },
         },
@@ -90,6 +96,11 @@ export function createRoomMachine(initialContext: RoomContext) {
           LEAVE: {
             actions: assign({
               players: ({ context, event }) => context.players.filter(p => p.id !== event.playerId),
+            }),
+          },
+          HOST_CHANGED: {
+            actions: assign({
+              hostId: ({ event }) => event.newHostId,
             }),
           },
         },
@@ -143,7 +154,10 @@ export function createRoomMachine(initialContext: RoomContext) {
           ],
           CLEAR_CELL: {
             actions: assign({
-              board: ({ context, event }) => clearCell(context.board, event.row, event.col),
+              board: ({ context, event }) => {
+                const updated = clearCell(context.board, event.row, event.col)
+                return applyConflicts(updated, event.conflicts)
+              },
             }),
           },
           TOGGLE_NOTE: {
@@ -159,6 +173,11 @@ export function createRoomMachine(initialContext: RoomContext) {
           LEAVE: {
             actions: assign({
               players: ({ context, event }) => context.players.filter(p => p.id !== event.playerId),
+            }),
+          },
+          HOST_CHANGED: {
+            actions: assign({
+              hostId: ({ event }) => event.newHostId,
             }),
           },
         },
@@ -180,6 +199,11 @@ export function createRoomMachine(initialContext: RoomContext) {
           LEAVE: {
             actions: assign({
               players: ({ context, event }) => context.players.filter(p => p.id !== event.playerId),
+            }),
+          },
+          HOST_CHANGED: {
+            actions: assign({
+              hostId: ({ event }) => event.newHostId,
             }),
           },
         },
