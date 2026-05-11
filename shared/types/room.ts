@@ -7,7 +7,6 @@ export interface PlayerInfo {
   username: string
   avatar: string
   colour: string
-  socketId: string
   isHost: boolean
 }
 

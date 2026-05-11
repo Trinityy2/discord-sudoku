@@ -9,7 +9,6 @@ const hostPlayer: PlayerInfo = {
   username: 'Host',
   avatar: '',
   colour: '#red',
-  socketId: 'socket-host',
   isHost: true,
 }
 
@@ -18,7 +17,6 @@ const player2: PlayerInfo = {
   username: 'Player2',
   avatar: '',
   colour: '#blue',
-  socketId: 'socket-2',
   isHost: false,
 }
 

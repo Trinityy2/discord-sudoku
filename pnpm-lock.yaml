@@ -11,8 +11,8 @@ importers:
   client:
     dependencies:
       '@discord/embedded-app-sdk':
-        specifier: latest
-        version: 2.4.1
+        specifier: ^1.0.0
+        version: 1.9.0
       '@xstate/react':
         specifier: ^4.0.0
         version: 4.1.3(@types/react@18.3.28)(react@18.3.1)(xstate@5.30.0)
@@ -207,8 +207,8 @@ packages:
     resolution: {integrity: sha512-Vd/9EVDiu6PPJt9yAh6roZP6El1xHrdvIVGjyBsHR0RYwNHgL7FJPyIIW4fANJNG6FtyZfvlRPpFI4ZM/lubvw==}
     engines: {node: '>=18'}
 
-  '@discord/embedded-app-sdk@2.4.1':
-    resolution: {integrity: sha512-oybHVPf+nfN4+p3j3ysAdlZsKNYLYeod2Lc7g8zdS516KDj9kPXe5pYlLZ6Gqi4lBjpeMnU543OHYuK1+nl+/A==}
+  '@discord/embedded-app-sdk@1.9.0':
+    resolution: {integrity: sha512-aesQGKyhQgcxuY4/iJoylFfFaynZeU70Y5nqDtFNQ6Hs11LH+Xly7CfD6AhkTNssIyLljEkxG5ZYLU6Bj6n1kw==}
 
   '@esbuild/aix-ppc64@0.21.5':
     resolution: {integrity: sha512-1SDgH6ZSPTlggy1yI6+Dbkiz8xzpHJEVAlF/AM1tHPLsf5STom9rwtjE4hKAF20FfXXNTFqEYXyJNWh1GiZedQ==}
@@ -1496,8 +1496,9 @@ packages:
     peerDependencies:
       react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
-  uuid@11.1.0:
-    resolution: {integrity: sha512-0/A9rDy9P7cJ+8w1c9WD9V//9Wj15Ce2MPz8Ri6032usz+NfePxx5AcN3bN+r6ZL6jEo066/yNYB3tn4pQEx+A==}
+  uuid@10.0.0:
+    resolution: {integrity: sha512-8XkAphELsDnEGrDxUOHB3RGvXz6TeuYSGEZBOjtTtPm2lwhGBjLgOzLHB63IUWfBpNucQjND6d3AOudO+H3RWQ==}
+    deprecated: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
     hasBin: true
 
   v8-compile-cache-lib@3.0.1:
@@ -1831,7 +1832,7 @@ snapshots:
 
   '@csstools/css-tokenizer@3.0.4': {}
 
-  '@discord/embedded-app-sdk@2.4.1':
+  '@discord/embedded-app-sdk@1.9.0':
     dependencies:
       '@types/lodash.transform': 4.6.9
       '@types/uuid': 10.0.0
@@ -1839,7 +1840,7 @@ snapshots:
       decimal.js-light: 2.5.1
       eventemitter3: 5.0.4
       lodash.transform: 4.6.0
-      uuid: 11.1.0
+      uuid: 10.0.0
       zod: 3.25.76
 
   '@esbuild/aix-ppc64@0.21.5':
@@ -3071,7 +3072,7 @@ snapshots:
     dependencies:
       react: 18.3.1
 
-  uuid@11.1.0: {}
+  uuid@10.0.0: {}
 
   v8-compile-cache-lib@3.0.1: {}
 

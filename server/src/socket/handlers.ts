@@ -63,7 +63,8 @@ export function registerHandlers(io: IoServer, socket: IoSocket, deps: HandlerDe
 
     socket.join(channelId)
     socket.emit('room_state', room.getState())
-    socket.to(channelId).emit('player_joined', player as any)
+    const { socketId: _socketId, ...playerInfo } = player
+    socket.to(channelId).emit('player_joined', playerInfo)
   })
 
   socket.on('begin_setup', () => {

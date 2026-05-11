@@ -70,7 +70,7 @@ export class Room {
       phase: snapshot.value as any,
       board: this.board,
       metadata: this.metadata,
-      players: this.players as any,
+      players: this.players.map(({ socketId: _socketId, ...pub }) => pub),
       rulesetId: this.rulesetId,
       stats: snapshot.context.stats ?? undefined,
     }
