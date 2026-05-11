@@ -143,7 +143,10 @@ export function createRoomMachine(initialContext: RoomContext) {
           ],
           CLEAR_CELL: {
             actions: assign({
-              board: ({ context, event }) => clearCell(context.board, event.row, event.col),
+              board: ({ context, event }) => {
+                const updatedBoard = clearCell(context.board, event.row, event.col)
+                return applyConflicts(updatedBoard, event.conflicts)
+              },
             }),
           },
           TOGGLE_NOTE: {
